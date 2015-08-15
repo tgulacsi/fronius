@@ -17,10 +17,10 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -68,16 +68,25 @@ func main() {
 	for _, dt := range dates {
 		// TODO(tgulacsi): generalize this, get the date format from the URL.
 		dU := strings.Replace(dataURL, "{{2006/1/2}}", dt.Format("2006/1/2"), 1)
-		if err := get(*flagCookieJarPath, logonURL, dU); err != nil {
+		data, err := get(*flagCookieJarPath, logonURL, dU)
+		if err != nil {
 			Log.Error("get", "error", err)
 			os.Exit(1)
 		}
+		fmt.Fprintf(os.Stdout, "%v", data)
 	}
 }
-func get(cookieJarPath, logonURL, dataURL string) error {
+
+type DataPoint struct {
+	Time   time.Time
+	Energy float64
+}
+type Series map[string][]DataPoint
+
+func get(cookieJarPath, logonURL, dataURL string) (Series, error) {
 	jar, err := cookiejar.New(nil)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if err := jar.Load(cookieJarPath); err != nil {
 		Log.Warn("Load", "file", cookieJarPath, "error", err)
@@ -119,14 +128,14 @@ func get(cookieJarPath, logonURL, dataURL string) error {
 
 	resp, err := getURL(dataURL)
 	if err != nil && err != errLogonNeeded {
-		return err
+		return nil, err
 	}
 	if resp.Body != nil {
 		defer resp.Body.Close()
 	}
 	if resp.StatusCode == 302 || err == errLogonNeeded {
 		if resp, err = getURL(logonURL); err != nil {
-			return err
+			return nil, err
 		}
 		if resp.Body != nil {
 			resp.Body.Close()
@@ -135,10 +144,10 @@ func get(cookieJarPath, logonURL, dataURL string) error {
 			Log.Warn("logon", "status", resp.Status)
 		}
 		if err = jar.Save(); err != nil {
-			return err
+			return nil, err
 		}
 		if resp, err = getURL(dataURL); err != nil {
-			return err
+			return nil, err
 		}
 		if resp.Body != nil {
 			defer resp.Body.Close()
@@ -148,6 +157,41 @@ func get(cookieJarPath, logonURL, dataURL string) error {
 		Log.Warn("data", "status", resp.Status)
 	}
 
-	_, _ = io.Copy(os.Stderr, resp.Body)
-	return nil
+	type (
+		titleText struct {
+			Text string `json:"text"`
+		}
+		yAxis struct {
+			Title titleText `json:"title"`
+		}
+		serie struct {
+			Name  string       `json:"name"`
+			YAxis int          `json:"yAxis"`
+			Data  [][2]float64 `json:"data"`
+		}
+		detailData struct {
+			YAxis  []yAxis `json:"yAxis"`
+			Energy string  `json:"energy"`
+			Unit   string  `json:"unit"`
+			Series []serie `json:"series"`
+		}
+	)
+	//_, _ = io.Copy(os.Stderr, resp.Body)
+	dec := json.NewDecoder(resp.Body)
+	var detail detailData
+	if err := dec.Decode(&detail); err != nil {
+		return nil, err
+	}
+	Log.Debug("detail", "data", detail)
+	ds := make(Series, len(detail.Series))
+	for _, s := range detail.Series {
+		m := make([]DataPoint, len(s.Data))
+		for i, dp := range s.Data {
+			//Log.Debug("time", "time", dp[0], "energy", dp[1])
+			// ms
+			m[i].Time, m[i].Energy = time.Unix(int64(dp[0])/1000, int64(dp[0])%1000), dp[1]
+		}
+		ds[s.Name] = m
+	}
+	return ds, nil
 }
