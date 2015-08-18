@@ -39,7 +39,8 @@ func main() {
 		flagCookieJarPath = flag.String("cookiejar", "fronius.cookies", "path to the cookie storage file")
 		flagBaseURL       = flag.String("base", "https://www.solarweb.com", "Solar.Web's base URL")
 		flagLogonURL      = flag.String("logon", "{{BASE}}/Account/GuestLogOn?pvSystemId={{pvSystemID}}", "Logon URL")
-		flagDataURL       = flag.String("data", "{{BASE}}/NewCharts/GetDetailData/{{pvSystemID}}/00000000-0000-0000-0000-000000000000/Day/{{2006/1/2}}", "URL of the detail data")
+		flagDataURL       = flag.String("data", "{{BASE}}/NewCharts/GetDetailData/{{pvSystemID}}/00000000-0000-0000-0000-000000000000/Day/{{2006/1/2}}",
+			"URL of the detail data; the Go reference date (2006-01-02) will be replaced with the current date, in the given format.")
 	)
 	flag.Parse()
 	if flag.NArg() == 0 {
@@ -65,9 +66,23 @@ func main() {
 		"{{pvSystemID}}", pvSystemID)
 	logonURL := repl.Replace(*flagLogonURL)
 	dataURL := repl.Replace(*flagDataURL)
+	dateFormat, found := "2006-01-02", false
+	if i := strings.Index(dataURL, "{{"); i >= 0 {
+		if j := strings.Index(dataURL[i+2:], "}}"); i >= 0 {
+			if df := dataURL[i+2 : i+2+j]; strings.Contains(df, "2006") {
+				dateFormat, found = df, true
+			}
+		}
+	}
+	if found {
+		Log.Debug("reference date format in dataURL: " + dateFormat)
+	} else {
+		Log.Warn(`cannot find the reference date ("2006-01-02") in ` + dataURL + "!")
+	}
+
+	df := "{{" + dateFormat + "}}"
 	for _, dt := range dates {
-		// TODO(tgulacsi): generalize this, get the date format from the URL.
-		dU := strings.Replace(dataURL, "{{2006/1/2}}", dt.Format("2006/1/2"), 1)
+		dU := strings.Replace(dataURL, df, dt.Format(dateFormat), 1)
 		data, err := get(*flagCookieJarPath, logonURL, dU)
 		if err != nil {
 			Log.Error("get", "error", err)
