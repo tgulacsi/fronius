@@ -19,40 +19,123 @@ package main
 import (
 	"encoding/json"
 	"errors"
-	"flag"
 	"fmt"
 	"net/http"
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
+	influx "github.com/influxdb/influxdb/client"
 	"github.com/juju/persistent-cookiejar"
+	"github.com/spf13/cobra"
 	"gopkg.in/inconshreveable/log15.v2"
 )
 
 var Log = log15.New()
 
+type config struct {
+	SystemID                   string
+	BaseURL, DataURL, LogonURL string
+	CookieJarPath              string
+}
+
 func main() {
 	Log.SetHandler(log15.StderrHandler)
+
 	var (
-		flagCookieJarPath = flag.String("cookiejar", "fronius.cookies", "path to the cookie storage file")
-		flagBaseURL       = flag.String("base", "https://www.solarweb.com", "Solar.Web's base URL")
-		flagLogonURL      = flag.String("logon", "{{BASE}}/Account/GuestLogOn?pvSystemId={{pvSystemID}}", "Logon URL")
-		flagDataURL       = flag.String("data", "{{BASE}}/NewCharts/GetDetailData/{{pvSystemID}}/00000000-0000-0000-0000-000000000000/Day/{{2006/1/2}}",
-			"URL of the detail data; the Go reference date (2006-01-02) will be replaced with the current date, in the given format.")
+		conf = config{
+			CookieJarPath: "fronius.cookies",
+			BaseURL:       "https://www.solarweb.com",
+			LogonURL:      "{{BASE}}/Account/GuestLogOn?pvSystemId={{pvSystemID}}",
+			DataURL:       "{{BASE}}/NewCharts/GetDetailData/{{pvSystemID}}/00000000-0000-0000-0000-000000000000/Day/{{2006/1/2}}",
+		}
 	)
-	flag.Parse()
-	if flag.NArg() == 0 {
-		fmt.Fprintf(os.Stderr, "first argument must be the pvSystemID!")
-		os.Exit(1)
+
+	dumpCmd := &cobra.Command{
+		Use:   "dump",
+		Short: "dump data points from the given days (today is the default)",
+		Run: func(_ *cobra.Command, args []string) {
+			if len(args) == 0 {
+				fmt.Fprintf(os.Stderr, "first argument must be the pvSystemID!")
+				os.Exit(1)
+			}
+			conf.SystemID = args[0]
+			c := make(chan Series, 1)
+			var wg sync.WaitGroup
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for data := range c {
+					for k, points := range data {
+						for _, p := range points {
+							fmt.Fprintf(os.Stdout, "%q;%q;%.3f\n", k, p.Time, p.Energy)
+						}
+					}
+				}
+			}()
+			if err := conf.getDaysSeries(c, args[1:]...); err != nil {
+				Log.Error("getDaysSeries", "args", args, "error", err)
+				os.Exit(2)
+			}
+			wg.Wait()
+		},
 	}
-	pvSystemID := flag.Arg(0)
-	dates := make([]time.Time, 0, flag.NArg())
-	if flag.NArg() == 1 {
+
+	mainCmd := &cobra.Command{
+		Use: "fronius",
+		Run: func(_ *cobra.Command, args []string) {
+			dumpCmd.Run(dumpCmd, args)
+		},
+	}
+	mainCmd.AddCommand(dumpCmd)
+	pflags := mainCmd.PersistentFlags()
+	pflags.StringVar(&conf.CookieJarPath, "cookiejar", conf.CookieJarPath, "path to the cookie storage file")
+	pflags.StringVar(&conf.BaseURL, "base", conf.BaseURL, "Solar.Web's base URL")
+	pflags.StringVar(&conf.LogonURL, "logon", conf.LogonURL, "Logon URL")
+	pflags.StringVar(&conf.DataURL, "data", conf.DataURL,
+		"URL of the detail data; the Go reference date (2006-01-02) will be replaced with the current date, in the given format.")
+
+	influxDB := "http://localhost:8086"
+	influxCmd := &cobra.Command{
+		Use:   "influx",
+		Short: "insert data into the InfluxDB specified with the --server flag",
+		Run: func(_ *cobra.Command, args []string) {
+			u, err := url.Parse(influxDB)
+			if err != nil {
+				Log.Crit("parse influx", "URL", influxDB, "error", err)
+				os.Exit(1)
+			}
+			conf := influx.Config{
+				URL:      *u,
+				Username: os.Getenv("INFLUX_USER"),
+				Password: os.Getenv("INFLUX_PASSW"),
+			}
+			con, err := influx.NewClient(conf)
+			if err != nil {
+				Log.Error("connect to influx DB", "config", conf, "error", err)
+				os.Exit(1)
+			}
+			Log.Debug("connected", "server", con)
+		},
+	}
+	influxCmd.Flags().StringVar(&influxDB, "server", influxDB, "influx database to insert data into")
+	mainCmd.AddCommand(influxCmd)
+
+	if _, _, err := mainCmd.Find(os.Args[1:]); err != nil && strings.HasPrefix(err.Error(), "unknown command") {
+		mainCmd.SetArgs(append([]string{"dump"}, os.Args[1:]...))
+	}
+	mainCmd.Execute()
+}
+
+func (conf config) getDaysSeries(dst chan<- Series, days ...string) error {
+	defer close(dst)
+	dates := make([]time.Time, 0, len(days))
+	if len(days) == 0 {
 		dates = append(dates, time.Now().Truncate(24*time.Hour))
 	} else {
-		for _, arg := range flag.Args()[1:] {
+		for _, arg := range days {
 			dt, err := time.Parse("2006-01-02", arg)
 			if err != nil {
 				Log.Error("cannot parse given date as 2006-01-02", "date", arg, "error", err)
@@ -62,14 +145,14 @@ func main() {
 		}
 	}
 
-	repl := strings.NewReplacer("{{BASE}}", *flagBaseURL,
-		"{{pvSystemID}}", pvSystemID)
-	logonURL := repl.Replace(*flagLogonURL)
-	dataURL := repl.Replace(*flagDataURL)
+	repl := strings.NewReplacer("{{BASE}}", conf.BaseURL,
+		"{{pvSystemID}}", conf.SystemID)
+	conf.LogonURL = repl.Replace(conf.LogonURL)
+	conf.DataURL = repl.Replace(conf.DataURL)
 	dateFormat, found := "2006-01-02", false
-	if i := strings.Index(dataURL, "{{"); i >= 0 {
-		if j := strings.Index(dataURL[i+2:], "}}"); i >= 0 {
-			if df := dataURL[i+2 : i+2+j]; strings.Contains(df, "2006") {
+	if i := strings.Index(conf.DataURL, "{{"); i >= 0 {
+		if j := strings.Index(conf.DataURL[i+2:], "}}"); i >= 0 {
+			if df := conf.DataURL[i+2 : i+2+j]; strings.Contains(df, "2006") {
 				dateFormat, found = df, true
 			}
 		}
@@ -77,19 +160,19 @@ func main() {
 	if found {
 		Log.Debug("reference date format in dataURL: " + dateFormat)
 	} else {
-		Log.Warn(`cannot find the reference date ("2006-01-02") in ` + dataURL + "!")
+		Log.Warn(`cannot find the reference date ("2006-01-02") in ` + conf.DataURL + "!")
 	}
 
 	df := "{{" + dateFormat + "}}"
 	for _, dt := range dates {
-		dU := strings.Replace(dataURL, df, dt.Format(dateFormat), 1)
-		data, err := get(*flagCookieJarPath, logonURL, dU)
+		dU := strings.Replace(conf.DataURL, df, dt.Format(dateFormat), 1)
+		data, err := conf.get(dU)
 		if err != nil {
-			Log.Error("get", "error", err)
-			os.Exit(1)
+			return err
 		}
-		fmt.Fprintf(os.Stdout, "%v", data)
+		dst <- data
 	}
+	return nil
 }
 
 type DataPoint struct {
@@ -98,13 +181,13 @@ type DataPoint struct {
 }
 type Series map[string][]DataPoint
 
-func get(cookieJarPath, logonURL, dataURL string) (Series, error) {
+func (conf config) get(dataURL string) (Series, error) {
 	jar, err := cookiejar.New(nil)
 	if err != nil {
 		return nil, err
 	}
-	if err := jar.Load(cookieJarPath); err != nil {
-		Log.Warn("Load", "file", cookieJarPath, "error", err)
+	if err := jar.Load(conf.CookieJarPath); err != nil {
+		Log.Warn("Load", "file", conf.CookieJarPath, "error", err)
 	}
 
 	errLogonNeeded := errors.New("logon needed")
@@ -149,7 +232,7 @@ func get(cookieJarPath, logonURL, dataURL string) (Series, error) {
 		defer resp.Body.Close()
 	}
 	if resp.StatusCode == 302 || err == errLogonNeeded {
-		if resp, err = getURL(logonURL); err != nil {
+		if resp, err = getURL(conf.LogonURL); err != nil {
 			return nil, err
 		}
 		if resp.Body != nil {
