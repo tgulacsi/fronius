@@ -16,18 +16,18 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/juju/persistent-cookiejar"
-	"github.com/kisom/cryptutils/common/secret"
+	"github.com/tgulacsi/go/crypthlp"
 )
 
 func (conf *config) getDaysSeries(dst chan<- Series, days ...string) error {
@@ -110,15 +110,18 @@ var errLogonNeeded = errors.New("logon needed")
 
 func (conf *config) get(dataURL string) (Series, error) {
 	var err error
+	var key *crypthlp.Key
 	conf.initClient.Do(func() {
 		var err error
 		if conf.jar, err = cookiejar.New(nil); err != nil {
 			return
 		}
-		if sr, err := openJar(conf.CookieJarPath, []byte(conf.SystemID)); err != nil {
+		if k, sr, err := openJar(conf.CookieJarPath, []byte(conf.SystemID)); err != nil {
 			Log.Warn("openJar", "file", conf.CookieJarPath, "error", err)
 		} else if err = conf.jar.ReadFrom(sr); err != nil {
 			Log.Warn("Load", "file", conf.CookieJarPath, "error", err)
+		} else {
+			key = &k
 		}
 
 		conf.Client = &http.Client{
@@ -175,8 +178,11 @@ func (conf *config) get(dataURL string) (Series, error) {
 		if resp.StatusCode > 299 {
 			Log.Warn("logon", "status", resp.Status)
 		}
+		sw, err := saveJar(conf.CookieJarPath, []byte(conf.SystemID), key)
+		if err != nil {
+			return nil, err
+		}
 		conf.jarMu.Lock()
-		sw := saveJar(conf.CookieJarPath, []byte(conf.SystemID))
 		err = conf.jar.WriteTo(sw)
 		conf.jarMu.Unlock()
 		if err != nil {
@@ -235,24 +241,17 @@ func (conf *config) get(dataURL string) (Series, error) {
 	return ds, nil
 }
 
-func openJar(filename string, passphrase []byte) (io.Reader, error) {
-	data, err := secret.DecryptFile(filename, passphrase)
-	if err != nil {
-		return nil, err
+func openJar(filename string, passphrase []byte) (crypthlp.Key, io.Reader, error) {
+	return crypthlp.Open(filename, passphrase)
+}
+
+func saveJar(filename string, passphrase []byte, key *crypthlp.Key) (io.WriteCloser, error) {
+	if key != nil {
+		fh, err := os.Create(filename)
+		if err != nil {
+			return nil, err
+		}
+		return key.CreateWriter(fh)
 	}
-	return bytes.NewReader(data), nil
-}
-
-func saveJar(filename string, passphrase []byte) io.WriteCloser {
-	return &secretWriter{filename: filename, passphrase: passphrase}
-}
-
-type secretWriter struct {
-	filename   string
-	passphrase []byte
-	bytes.Buffer
-}
-
-func (sw secretWriter) Close() error {
-	return secret.EncryptFile(sw.filename, sw.passphrase, sw.Buffer.Bytes())
+	return crypthlp.Create(filename, passphrase, 5*time.Second)
 }
