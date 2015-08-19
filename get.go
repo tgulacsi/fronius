@@ -16,8 +16,10 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -25,6 +27,7 @@ import (
 	"time"
 
 	"github.com/juju/persistent-cookiejar"
+	"github.com/kisom/cryptutils/common/secret"
 )
 
 func (conf *config) getDaysSeries(dst chan<- Series, days ...string) error {
@@ -112,7 +115,9 @@ func (conf *config) get(dataURL string) (Series, error) {
 		if conf.jar, err = cookiejar.New(nil); err != nil {
 			return
 		}
-		if err := conf.jar.Load(conf.CookieJarPath); err != nil {
+		if sr, err := openJar(conf.CookieJarPath, []byte(conf.SystemID)); err != nil {
+			Log.Warn("openJar", "file", conf.CookieJarPath, "error", err)
+		} else if err = conf.jar.ReadFrom(sr); err != nil {
 			Log.Warn("Load", "file", conf.CookieJarPath, "error", err)
 		}
 
@@ -171,9 +176,13 @@ func (conf *config) get(dataURL string) (Series, error) {
 			Log.Warn("logon", "status", resp.Status)
 		}
 		conf.jarMu.Lock()
-		err = conf.jar.Save()
+		sw := saveJar(conf.CookieJarPath, []byte(conf.SystemID))
+		err = conf.jar.WriteTo(sw)
 		conf.jarMu.Unlock()
 		if err != nil {
+			return nil, err
+		}
+		if err = sw.Close(); err != nil {
 			return nil, err
 		}
 		if resp, err = getURL(dataURL); err != nil {
@@ -224,4 +233,26 @@ func (conf *config) get(dataURL string) (Series, error) {
 		ds[s.Name] = m
 	}
 	return ds, nil
+}
+
+func openJar(filename string, passphrase []byte) (io.Reader, error) {
+	data, err := secret.DecryptFile(filename, passphrase)
+	if err != nil {
+		return nil, err
+	}
+	return bytes.NewReader(data), nil
+}
+
+func saveJar(filename string, passphrase []byte) io.WriteCloser {
+	return &secretWriter{filename: filename, passphrase: passphrase}
+}
+
+type secretWriter struct {
+	filename   string
+	passphrase []byte
+	bytes.Buffer
+}
+
+func (sw secretWriter) Close() error {
+	return secret.EncryptFile(sw.filename, sw.passphrase, sw.Buffer.Bytes())
 }
