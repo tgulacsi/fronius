@@ -18,7 +18,6 @@ package main
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -229,17 +228,20 @@ func (conf *config) get(dataURL string) (Series, error) {
 	if err := dec.Decode(&detail); err != nil {
 		return nil, err
 	}
-	Log.Debug("data", fmt.Sprintf("%#v", detail))
 	ds := make(Series, len(detail.Series))
+	n := 0
 	for _, s := range detail.Series {
 		m := make([]DataPoint, len(s.Data))
 		for i, dp := range s.Data {
 			//Log.Debug("time", dp[0], "energy", dp[1])
 			// ms
 			m[i].Time, m[i].Energy = time.Unix(int64(dp[0])/1000, int64(dp[0])%1000), dp[1]
+			n++
+
 		}
 		ds[s.Name] = m
 	}
+	Log.Info("number_of_data_points", n)
 	return ds, nil
 }
 

@@ -18,6 +18,7 @@ package main
 
 import (
 	"fmt"
+	stdlog "log"
 	"net/http"
 	"net/url"
 	"os"
@@ -31,7 +32,10 @@ import (
 	"gopkg.in/kit.v0/log/levels"
 )
 
-var Log = levels.New(log.NewLogfmtLogger(os.Stderr))
+var (
+	logger = log.NewLogfmtLogger(os.Stderr)
+	Log    = levels.New(logger)
+)
 
 type config struct {
 	SystemID                   string
@@ -48,6 +52,7 @@ type config struct {
 }
 
 func main() {
+	stdlog.SetOutput(log.NewStdlibAdapter(logger))
 	var (
 		conf = config{
 			CookieJarPath: "fronius.cookies",
