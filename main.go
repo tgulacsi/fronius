@@ -27,10 +27,11 @@ import (
 	influx "github.com/influxdb/influxdb/client"
 	"github.com/juju/persistent-cookiejar"
 	"github.com/spf13/cobra"
-	"gopkg.in/inconshreveable/log15.v2"
+	"gopkg.in/kit.v0/log"
+	"gopkg.in/kit.v0/log/levels"
 )
 
-var Log = log15.New()
+var Log = levels.New(log.NewLogfmtLogger(os.Stderr))
 
 type config struct {
 	SystemID                   string
@@ -47,8 +48,6 @@ type config struct {
 }
 
 func main() {
-	Log.SetHandler(log15.StderrHandler)
-
 	var (
 		conf = config{
 			CookieJarPath: "fronius.cookies",
