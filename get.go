@@ -47,6 +47,20 @@ func (conf *config) getDaysSeries(dst chan<- Series, days ...string) error {
 		}
 	}
 
+	if len(dates) == 2 && dates[0].Before(dates[1].AddDate(0, 0, -1)) {
+		last := dates[1]
+		dates = dates[:1]
+		dt := dates[0]
+		for {
+			dt = dt.AddDate(0, 0, 1)
+			if !dt.Before(last) {
+				break
+			}
+			dates = append(dates, dt)
+		}
+		dates = append(dates, last)
+	}
+
 	conf.initURLs.Do(func() {
 		repl := strings.NewReplacer("{{BASE}}", conf.BaseURL,
 			"{{pvSystemID}}", conf.SystemID)

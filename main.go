@@ -25,11 +25,11 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/go-kit/kit/log"
+	"github.com/go-kit/kit/log/levels"
 	influx "github.com/influxdb/influxdb/client"
 	"github.com/juju/persistent-cookiejar"
 	"github.com/spf13/cobra"
-	"gopkg.in/kit.v0/log"
-	"gopkg.in/kit.v0/log/levels"
 )
 
 var (
