@@ -39,7 +39,7 @@ func (conf *config) getDaysSeries(dst chan<- Series, days ...string) error {
 		for _, arg := range days {
 			dt, err := time.Parse("2006-01-02", arg)
 			if err != nil {
-				Log.Error("msg", "cannot parse given date as 2006-01-02",
+				Log.Error().Log("msg", "cannot parse given date as 2006-01-02",
 					"date", arg, "error", err)
 				continue
 			}
@@ -76,9 +76,9 @@ func (conf *config) getDaysSeries(dst chan<- Series, days ...string) error {
 			}
 		}
 		if found {
-			Log.Debug("msg", "reference date format in dataURL: "+conf.dateFormat)
+			Log.Debug().Log("msg", "reference date format in dataURL: "+conf.dateFormat)
 		} else {
-			Log.Warn("msg", `cannot find the reference date ("2006-01-02") in `+conf.DataURL+"!")
+			Log.Warn().Log("msg", `cannot find the reference date ("2006-01-02") in `+conf.DataURL+"!")
 		}
 	})
 
@@ -132,9 +132,9 @@ func (conf *config) get(dataURL string) (Series, error) {
 			return
 		}
 		if k, sr, err := openJar(conf.CookieJarPath, []byte(conf.SystemID)); err != nil {
-			Log.Warn("action", "openJar", "file", conf.CookieJarPath, "error", err)
+			Log.Warn().Log("action", "openJar", "file", conf.CookieJarPath, "error", err)
 		} else if err = conf.jar.ReadFrom(sr); err != nil {
-			Log.Warn("action", "Load", "file", conf.CookieJarPath, "error", err)
+			Log.Warn().Log("action", "Load", "file", conf.CookieJarPath, "error", err)
 		} else {
 			key = &k
 		}
@@ -143,7 +143,7 @@ func (conf *config) get(dataURL string) (Series, error) {
 			Jar:     conf.jar,
 			Timeout: 30 * time.Second,
 			CheckRedirect: func(req *http.Request, via []*http.Request) error {
-				Log.Debug("req", req, "via", via)
+				Log.Debug().Log("req", req, "via", via)
 				if strings.HasPrefix(req.URL.Path, "/Account/LogOn") {
 					return errLogonNeeded
 				}
@@ -157,7 +157,7 @@ func (conf *config) get(dataURL string) (Series, error) {
 
 	getURL := func(dataURL string) (*http.Response, error) {
 		getLog := Log.With("url", dataURL)
-		getLog.Debug("method", "GET")
+		getLog.Debug().Log("method", "GET")
 		resp, err := conf.Client.Get(dataURL)
 		if err != nil {
 			if ue, ok := err.(*url.Error); ok {
@@ -165,13 +165,13 @@ func (conf *config) get(dataURL string) (Series, error) {
 					return resp, ue.Err
 				}
 			}
-			getLog.Error("error", err)
+			getLog.Error().Log("error", err)
 			return resp, err
 		}
 		if resp.StatusCode > 299 {
-			getLog.Warn("status", resp.Status, "headers", resp.Header)
+			getLog.Warn().Log("status", resp.Status, "headers", resp.Header)
 		} else {
-			getLog.Debug("status", resp.Status)
+			getLog.Debug().Log("status", resp.Status)
 		}
 		return resp, err
 	}
@@ -191,7 +191,7 @@ func (conf *config) get(dataURL string) (Series, error) {
 			resp.Body.Close()
 		}
 		if resp.StatusCode > 299 {
-			Log.With("url", conf.LogonURL).Warn("status", resp.Status)
+			Log.With("url", conf.LogonURL).Warn().Log("status", resp.Status)
 		}
 		sw, err := saveJar(conf.CookieJarPath, []byte(conf.SystemID), key)
 		if err != nil {
@@ -214,7 +214,7 @@ func (conf *config) get(dataURL string) (Series, error) {
 		}
 	}
 	if resp.StatusCode > 299 {
-		Log.With("url", dataURL).Warn("status", resp.Status)
+		Log.With("url", dataURL).Warn().Log("status", resp.Status)
 	}
 
 	type (
@@ -247,7 +247,7 @@ func (conf *config) get(dataURL string) (Series, error) {
 	for _, s := range detail.Series {
 		m := make([]DataPoint, len(s.Data))
 		for i, dp := range s.Data {
-			//Log.Debug("time", dp[0], "energy", dp[1])
+			//Log.Debug().Log("time", dp[0], "energy", dp[1])
 			// ms
 			m[i].Time, m[i].Energy = time.Unix(int64(dp[0])/1000, int64(dp[0])%1000), dp[1]
 			n++
@@ -255,7 +255,7 @@ func (conf *config) get(dataURL string) (Series, error) {
 		}
 		ds[s.Name] = m
 	}
-	Log.Info("number_of_data_points", n)
+	Log.Info().Log("number_of_data_points", n)
 	return ds, nil
 }
 

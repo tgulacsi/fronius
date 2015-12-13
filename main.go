@@ -20,14 +20,12 @@ import (
 	"fmt"
 	stdlog "log"
 	"net/http"
-	"net/url"
 	"os"
 	"strings"
 	"sync"
 
 	"github.com/go-kit/kit/log"
 	"github.com/go-kit/kit/log/levels"
-	influx "github.com/influxdb/influxdb/client"
 	"github.com/juju/persistent-cookiejar"
 	"github.com/spf13/cobra"
 )
@@ -76,13 +74,45 @@ func main() {
 		},
 	}
 
+	var (
+		influxDB        = "http://localhost:8086"
+		database        = "fronius"
+		retentionPolicy = "default"
+		servePath       = "/solarapi/v1/current/"
+	)
+
+	serveCmd := &cobra.Command{
+		Use:   "serve",
+		Short: "accept push from the fronius datalogger",
+		Run: func(_ *cobra.Command, args []string) {
+			con, err := newInfluxClient(influxDB, database, retentionPolicy)
+			if err != nil {
+				Log.Crit().Log("msg", "influx connection", "error", err)
+				os.Exit(1)
+			}
+
+			http.Handle(servePath, solarAPIAccept{con})
+			addr := ":15015"
+			if len(args) > 0 {
+				addr = args[0]
+			}
+			Log.Info().Log("msg", "Start listening", "address", addr, "path", servePath)
+			http.ListenAndServe(addr, nil)
+		},
+	}
+	f := serveCmd.Flags()
+	f.StringVar(&servePath, "serve.path", servePath, "HTTP endpoint to publish")
+	f.StringVar(&influxDB, "server", influxDB, "influx server to connect to")
+	f.StringVar(&database, "database", database, "influx database to insert data into")
+	f.StringVar(&retentionPolicy, "retention", retentionPolicy, "retention policy to use")
+
 	mainCmd := &cobra.Command{
 		Use: "fronius",
 		Run: func(_ *cobra.Command, args []string) {
 			dumpCmd.Run(dumpCmd, args)
 		},
 	}
-	mainCmd.AddCommand(dumpCmd)
+	mainCmd.AddCommand(dumpCmd, serveCmd)
 	pflags := mainCmd.PersistentFlags()
 	pflags.StringVar(&conf.CookieJarPath, "cookiejar", conf.CookieJarPath, "path to the cookie storage file")
 	pflags.StringVar(&conf.BaseURL, "base", conf.BaseURL, "Solar.Web's base URL")
@@ -90,68 +120,32 @@ func main() {
 	pflags.StringVar(&conf.DataURL, "data", conf.DataURL,
 		"URL of the detail data; the Go reference date (2006-01-02) will be replaced with the current date, in the given format.")
 
-	var (
-		influxDB        = "http://localhost:8086"
-		database        = "fronius"
-		retentionPolicy = "default"
-	)
 	influxCmd := &cobra.Command{
 		Use:   "influx",
 		Short: "insert data into the InfluxDB specified with the --server flag",
 		Run: func(_ *cobra.Command, args []string) {
-			u, err := url.Parse(influxDB)
+			ic, err := newInfluxClient(influxDB, database, retentionPolicy)
 			if err != nil {
-				Log.Crit("parse influx", "URL", influxDB, "error", err)
-				os.Exit(1)
-			}
-			influxConf := influx.Config{
-				URL:      *u,
-				Username: os.Getenv("INFLUX_USER"),
-				Password: os.Getenv("INFLUX_PASSW"),
-			}
-			con, err := influx.NewClient(influxConf)
-			if err != nil {
-				Log.Error("connect to influx DB", "config", influxConf, "error", err)
-				os.Exit(1)
-			}
-			Log.Debug("connected", "server", con)
-			if _, _, err = con.Ping(); err != nil {
-				Log.Error("ping", "error", err)
+				Log.Crit().Log("msg", "influx connection", "error", err)
 				os.Exit(1)
 			}
 
-			points := make([]influx.Point, 0, 512)
+			points := make([]dataPoint, 0, 512)
 			for data := range conf.dumpFromArgs(args) {
 				for k, dps := range data {
 					for _, p := range dps {
 						points = append(points,
-							influx.Point{
-								Measurement: "fronius energy",
-								Tags: map[string]string{
-									"name": k,
-								},
-								Fields: map[string]interface{}{
-									"energy": p.Energy,
-								},
-								Time:      p.Time,
-								Precision: "kWh",
-							})
+							dataPoint{Name: k, Value: p.Energy, Time: p.Time, Precision: "kWh"})
 					}
 				}
 			}
-
-			bps := influx.BatchPoints{
-				Points:          points,
-				Database:        database,
-				RetentionPolicy: retentionPolicy,
-			}
-			if _, err = con.Write(bps); err != nil {
-				Log.Error("write batch to db", "error", err)
+			if err := ic.Put("fronius energy", points...); err != nil {
+				Log.Error().Log("msg", "write batch to db", "error", err)
 				os.Exit(2)
 			}
 		},
 	}
-	f := influxCmd.Flags()
+	f = influxCmd.Flags()
 	f.StringVar(&influxDB, "server", influxDB, "influx server to connect to")
 	f.StringVar(&database, "database", database, "influx database to insert data into")
 	f.StringVar(&retentionPolicy, "retention", retentionPolicy, "retention policy to use")
@@ -172,7 +166,7 @@ func (conf *config) dumpFromArgs(args []string) chan Series {
 	c := make(chan Series, 1)
 	go func() {
 		if err := conf.getDaysSeries(c, args[1:]...); err != nil {
-			Log.Error("getDaysSeries", "args", args, "error", err)
+			Log.Error().Log("getDaysSeries", "args", args, "error", err)
 			os.Exit(2)
 		}
 	}()
