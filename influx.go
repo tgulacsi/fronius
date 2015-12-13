@@ -55,9 +55,9 @@ func newInfluxClient(influxDB, database, retentionPolicy string) (influxClient, 
 
 type dataPoint struct {
 	time.Time
-	Name      string
-	Value     interface{}
-	Precision string
+	Name  string
+	Value float64
+	Unit  string
 }
 
 func (c influxClient) Put(measurement string, points ...dataPoint) error {
@@ -66,9 +66,8 @@ func (c influxClient) Put(measurement string, points ...dataPoint) error {
 		ip[i] = influx.Point{
 			Measurement: measurement,
 			Tags:        map[string]string{"name": p.Name},
-			Fields:      map[string]interface{}{"energy": p.Value},
+			Fields:      map[string]interface{}{"energy": p.Value, "unit": p.Unit},
 			Time:        p.Time,
-			Precision:   p.Precision,
 		}
 	}
 

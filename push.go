@@ -47,17 +47,17 @@ func (sa solarAPIAccept) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err := sa.influxClient.Put("fronius energy",
 		[]dataPoint{
 			{Name: "pac", Time: data.Head.Timestamp,
-				Precision: data.Body.Pac.Unit,
-				Value:     data.Body.Pac.Values["1"]},
+				Unit:  data.Body.Pac.Unit,
+				Value: data.Body.Pac.Values["1"]},
 			{Name: "day", Time: data.Head.Timestamp,
-				Precision: data.Body.Day.Unit,
-				Value:     data.Body.Day.Values["1"]},
+				Unit:  data.Body.Day.Unit,
+				Value: data.Body.Day.Values["1"]},
 			{Name: "year", Time: data.Head.Timestamp,
-				Precision: data.Body.Year.Unit,
-				Value:     data.Body.Year.Values["1"]},
+				Unit:  data.Body.Year.Unit,
+				Value: data.Body.Year.Values["1"]},
 			{Name: "total", Time: data.Head.Timestamp,
-				Precision: data.Body.Total.Unit,
-				Value:     data.Body.Total.Values["1"]},
+				Unit:  data.Body.Total.Unit,
+				Value: data.Body.Total.Values["1"]},
 		}...); err != nil {
 		Log.Error().Log("msg", "write batch to db", "error", err)
 	}
@@ -89,5 +89,5 @@ type energyData struct {
 
 type energy struct {
 	Unit   string
-	Values map[string]int64
+	Values map[string]float64
 }

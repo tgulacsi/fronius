@@ -135,7 +135,7 @@ func main() {
 				for k, dps := range data {
 					for _, p := range dps {
 						points = append(points,
-							dataPoint{Name: k, Value: p.Energy, Time: p.Time, Precision: "kWh"})
+							dataPoint{Name: k, Value: p.Energy, Time: p.Time, Unit: "kWh"})
 					}
 				}
 			}
