@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"io/ioutil"
 	"net/http"
 	"net/url"
 	"os"
@@ -181,7 +182,10 @@ func (conf *config) get(dataURL string) (Series, error) {
 		return nil, err
 	}
 	if resp.Body != nil {
-		defer resp.Body.Close()
+		defer func() {
+			io.Copy(ioutil.Discard, resp.Body)
+			resp.Body.Close()
+		}()
 	}
 	if resp.StatusCode == 302 || err == errLogonNeeded {
 		if resp, err = getURL(conf.LogonURL); err != nil {

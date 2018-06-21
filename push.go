@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"net/http"
 	"time"
 )
@@ -32,7 +33,10 @@ type solarAPIAccept struct {
 func (sa solarAPIAccept) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	Log.Info().Log("msg", r.Method, "url", r.URL, "header", fmt.Sprintf("%#v", r.Header))
 	if r.Body != nil {
-		defer r.Body.Close()
+		defer func() {
+			io.Copy(ioutil.Discard, r.Body)
+			r.Body.Close()
+		}()
 	}
 	var buf bytes.Buffer
 	var data solarV1CurrentInverter
