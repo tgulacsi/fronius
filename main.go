@@ -25,15 +25,12 @@ import (
 	"sync"
 
 	"github.com/go-kit/kit/log"
-	"github.com/go-kit/kit/log/levels"
+	"github.com/go-kit/kit/log/level"
 	"github.com/juju/persistent-cookiejar"
 	"github.com/spf13/cobra"
 )
 
-var (
-	logger = log.NewLogfmtLogger(os.Stderr)
-	Log    = levels.New(logger)
-)
+var logger = log.NewLogfmtLogger(os.Stderr)
 
 type config struct {
 	SystemID                   string
@@ -47,6 +44,8 @@ type config struct {
 	jarMu sync.Mutex
 	*http.Client
 	initClient sync.Once
+
+	Logger log.Logger
 }
 
 func main() {
@@ -85,9 +84,9 @@ func main() {
 		Use:   "serve",
 		Short: "accept push from the fronius datalogger",
 		Run: func(_ *cobra.Command, args []string) {
-			con, err := newInfluxClient(influxDB, database, retentionPolicy)
+			con, err := newInfluxClient(influxDB, database, retentionPolicy, logger)
 			if err != nil {
-				Log.Crit().Log("msg", "influx connection", "error", err)
+				level.Error(logger).Log("msg", "influx connection", "error", err)
 				os.Exit(1)
 			}
 
@@ -96,7 +95,7 @@ func main() {
 			if len(args) > 0 {
 				addr = args[0]
 			}
-			Log.Info().Log("msg", "Start listening", "address", addr, "path", servePath)
+			level.Info(logger).Log("msg", "Start listening", "address", addr, "path", servePath)
 			http.ListenAndServe(addr, nil)
 		},
 	}
@@ -124,9 +123,9 @@ func main() {
 		Use:   "influx",
 		Short: "insert data into the InfluxDB specified with the --server flag",
 		Run: func(_ *cobra.Command, args []string) {
-			ic, err := newInfluxClient(influxDB, database, retentionPolicy)
+			ic, err := newInfluxClient(influxDB, database, retentionPolicy, logger)
 			if err != nil {
-				Log.Crit().Log("msg", "influx connection", "error", err)
+				level.Error(logger).Log("msg", "influx connection", "error", err)
 				os.Exit(1)
 			}
 
@@ -140,7 +139,7 @@ func main() {
 				}
 			}
 			if err := ic.Put("fronius energy", points...); err != nil {
-				Log.Error().Log("msg", "write batch to db", "error", err)
+				level.Error(logger).Log("msg", "write batch to db", "error", err)
 				os.Exit(2)
 			}
 		},
@@ -166,7 +165,7 @@ func (conf *config) dumpFromArgs(args []string) chan Series {
 	c := make(chan Series, 1)
 	go func() {
 		if err := conf.getDaysSeries(c, args[1:]...); err != nil {
-			Log.Error().Log("getDaysSeries", "args", args, "error", err)
+			level.Error(logger).Log("getDaysSeries", "args", args, "error", err)
 			os.Exit(2)
 		}
 	}()

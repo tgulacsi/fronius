@@ -24,6 +24,8 @@ import (
 	"io/ioutil"
 	"net/http"
 	"time"
+
+	"github.com/go-kit/kit/log/level"
 )
 
 type solarAPIAccept struct {
@@ -31,7 +33,7 @@ type solarAPIAccept struct {
 }
 
 func (sa solarAPIAccept) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	Log.Info().Log("msg", r.Method, "url", r.URL, "header", fmt.Sprintf("%#v", r.Header))
+	level.Info(sa.Logger).Log("msg", r.Method, "url", r.URL, "header", fmt.Sprintf("%#v", r.Header))
 	if r.Body != nil {
 		defer func() {
 			io.Copy(ioutil.Discard, r.Body)
@@ -41,11 +43,11 @@ func (sa solarAPIAccept) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var buf bytes.Buffer
 	var data solarV1CurrentInverter
 	if err := json.NewDecoder(io.TeeReader(r.Body, &buf)).Decode(&data); err != nil {
-		Log.Error().Log("msg", "decode", "message", buf.String(), "error", err)
+		level.Error(sa.Logger).Log("msg", "decode", "message", buf.String(), "error", err)
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	Log.Debug().Log("msg", "decoded", "data", fmt.Sprintf("%#v", data))
+	level.Debug(sa.Logger).Log("msg", "decoded", "data", fmt.Sprintf("%#v", data))
 	w.WriteHeader(200)
 
 	if err := sa.influxClient.Put("fronius energy",
@@ -63,7 +65,7 @@ func (sa solarAPIAccept) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				Unit:  data.Body.Total.Unit,
 				Value: data.Body.Total.Values["1"]},
 		}...); err != nil {
-		Log.Error().Log("msg", "write batch to db", "error", err)
+		level.Error(sa.Logger).Log("msg", "write batch to db", "error", err)
 	}
 }
 

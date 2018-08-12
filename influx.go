@@ -21,21 +21,25 @@ import (
 	"os"
 	"time"
 
-	"gopkg.in/errgo.v1"
+	"github.com/pkg/errors"
 
+	"github.com/go-kit/kit/log"
+	"github.com/go-kit/kit/log/level"
 	influx "github.com/influxdb/influxdb/client"
 )
 
 type influxClient struct {
 	*influx.Client
 	Database, RetentionPolicy string
+
+	Logger log.Logger
 }
 
-func newInfluxClient(influxDB, database, retentionPolicy string) (influxClient, error) {
+func newInfluxClient(influxDB, database, retentionPolicy string, logger log.Logger) (influxClient, error) {
 	var ic influxClient
 	u, err := url.Parse(influxDB)
 	if err != nil {
-		return ic, errgo.Notef(err, "parse %q", influxDB)
+		return ic, errors.Wrapf(err, "parse %q", influxDB)
 	}
 	influxConf := influx.Config{
 		URL:      *u,
@@ -44,13 +48,13 @@ func newInfluxClient(influxDB, database, retentionPolicy string) (influxClient, 
 	}
 	con, err := influx.NewClient(influxConf)
 	if err != nil {
-		return ic, errgo.Notef(err, "%#v", influxConf)
+		return ic, errors.Wrapf(err, "%#v", influxConf)
 	}
-	Log.Debug().Log("connected", "server", con)
+	level.Debug(logger).Log("connected", "server", con)
 	if _, _, err = con.Ping(); err != nil {
-		return ic, errgo.Notef(err, "ping")
+		return ic, errors.Wrapf(err, "ping")
 	}
-	return influxClient{Client: con, Database: database, RetentionPolicy: retentionPolicy}, nil
+	return influxClient{Client: con, Database: database, RetentionPolicy: retentionPolicy, Logger: logger}, nil
 }
 
 type dataPoint struct {
