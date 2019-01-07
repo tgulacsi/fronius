@@ -1,4 +1,4 @@
-// Copyright 2015 Tamás Gulácsi
+// Copyright 2019 Tamás Gulácsi
 //
 //
 //    Licensed under the Apache License, Version 2.0 (the "License");
@@ -136,7 +136,7 @@ func (conf *config) get(dataURL string) (Series, error) {
 		}
 		if k, sr, err := openJar(conf.CookieJarPath, []byte(conf.SystemID)); err != nil {
 			level.Warn(conf.Logger).Log("action", "openJar", "file", conf.CookieJarPath, "error", err)
-		} else if err = conf.jar.ReadFrom(sr); err != nil {
+		} else if err = json.NewDecoder(sr).Decode(conf.jar); err != nil {
 			level.Warn(conf.Logger).Log("action", "Load", "file", conf.CookieJarPath, "error", err)
 		} else {
 			key = &k
@@ -205,7 +205,7 @@ func (conf *config) get(dataURL string) (Series, error) {
 			return nil, err
 		}
 		conf.jarMu.Lock()
-		err = conf.jar.WriteTo(sw)
+		err = json.NewEncoder(sw).Encode(conf.jar)
 		conf.jarMu.Unlock()
 		if err != nil {
 			return nil, err
