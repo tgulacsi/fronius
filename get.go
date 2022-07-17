@@ -19,8 +19,8 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"io/ioutil"
 	"net/http"
+	"net/http/cookiejar"
 	"net/url"
 	"os"
 	"strings"
@@ -29,7 +29,6 @@ import (
 
 	"github.com/go-kit/kit/log"
 	"github.com/go-kit/kit/log/level"
-	"github.com/juju/persistent-cookiejar"
 	"github.com/tgulacsi/go/crypthlp"
 )
 
@@ -186,7 +185,7 @@ func (conf *config) get(dataURL string) (Series, error) {
 	}
 	if resp.Body != nil {
 		defer func() {
-			io.Copy(ioutil.Discard, resp.Body)
+			io.Copy(io.Discard, resp.Body)
 			resp.Body.Close()
 		}()
 	}

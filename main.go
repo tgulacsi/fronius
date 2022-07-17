@@ -20,13 +20,13 @@ import (
 	"fmt"
 	stdlog "log"
 	"net/http"
+	"net/http/cookiejar"
 	"os"
 	"strings"
 	"sync"
 
 	"github.com/go-kit/kit/log"
 	"github.com/go-kit/kit/log/level"
-	"github.com/juju/persistent-cookiejar"
 	"github.com/spf13/cobra"
 )
 

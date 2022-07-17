@@ -21,7 +21,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net/http"
 	"time"
 
@@ -36,7 +35,7 @@ func (sa solarAPIAccept) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	level.Info(sa.Logger).Log("msg", r.Method, "url", r.URL, "header", fmt.Sprintf("%#v", r.Header))
 	if r.Body != nil {
 		defer func() {
-			io.Copy(ioutil.Discard, r.Body)
+			io.Copy(io.Discard, r.Body)
 			r.Body.Close()
 		}()
 	}
